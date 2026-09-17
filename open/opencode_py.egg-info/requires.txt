@@ -1,0 +1,13 @@
+httpx<0.29,>=0.27
+requests<3.0,>=2.28
+rich<16.0,>=13.0
+platformdirs<5.0,>=4.0
+click<9.0,>=8.1
+pygments<3.0,>=2.16
+
+[dev]
+pytest>=8.0
+pytest-asyncio>=0.21
+
+[tui]
+textual<9.0,>=0.80
