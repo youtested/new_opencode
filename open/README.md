@@ -1,0 +1,274 @@
+# opencode_py
+
+A pure-Python reimplementation of the [opencode](https://github.com/anomalyco/opencode)
+coding agent — built for **32-bit ARM (armv7) Android phones running Termux**, and
+running fine on any desktop Linux/macOS machine.
+
+Zero binary dependencies: only pure-Python wheels (`httpx`, `rich`, `textual`,
+`click`, `platformdirs`). No pydantic-core / numpy / Rust — installs cleanly on armv7.
+
+```
+                build  plan     (agents)             x-preview-f-free  (model)
+──────────────────────────────────────────────────────────────────────────
+> opencode_py
+```
+
+## What it does
+
+An interactive CLI coding agent: you describe a software task, the agent streams
+a response, calls tools (read/edit/bash/search/web), and iterates until done.
+Two interfaces:
+
+- **TUI** (`opencode-py`) — full Textual terminal UI with chat view, model picker,
+  session picker, permission dialogs, themes, thought bubbles.
+- **Headless** (`opencode-py --no-tui -m '...'`) — one-shot line mode for scripts
+  and low-RAM phones.
+
+## Quick start
+
+```bash
+pip install -e .           # installs the opencode-py command
+opencode-py                # launch the TUI
+# or headless:
+echo 'create hello.py that prints hi' | opencode-py --no-tui
+```
+
+Inside the TUI:
+
+1. Type `/connect`, pick **OpenCode Zen**, paste your key
+   (free at <https://opencode.ai/auth>).
+2. Type a prompt; the agent streams, runs tools, edits files.
+3. `Tab` / `Ctrl+T` switches `build` ↔ `plan`; `Ctrl+C` interrupts a stream.
+
+Useful flags:
+
+```bash
+opencode-py --check                 # ping configured providers, report OK/fail
+opencode-py --models                # list live Zen models (free first)
+opencode-py --print-config          # show resolved config (secrets redacted)
+opencode-py --print-config --show-secrets
+opencode-py --model big-pickle      # override model
+opencode-py --provider groq --model llama-3.3-70b-versatile
+opencode-py --no-tui -m 'message'   # one-shot headless
+opencode-py --auto -m 'fix tests'   # headless, auto-approve tools
+```
+
+## Install on the phone (Termux, armv7 or arm64)
+
+```bash
+pkg install -y git
+git clone https://github.com/anomalyco/opencode_py.git   # or your fork
+cd opencode_py
+bash install_termux.sh
+opencode-py
+```
+
+`install_termux.sh` installs `python`, `git`, `ripgrep`, `openssh`, then the
+pure-Python requirements and the `opencode-py` command. To use your own fork:
+`REPO_URL=https://github.com/<you>/opencode_py.git bash install_termux.sh`.
+
+## Providers & free models
+
+One generic `chat/completions` HTTP client serves every provider. Key precedence
+everywhere (code, picker, listing): **env var > `providers.<id>.api_key` in
+`opencode.json` > `auth.json`** (`~/.local/share/opencode_py/auth.json`, chmod 0600).
+Keys are never logged.
+
+| Provider | Key env var | Get a free key |
+|---|---|---|
+| OpenCode Zen | `OPENCODE_API_KEY` | <https://opencode.ai/auth> |
+| Groq | `GROQ_API_KEY` | <https://console.groq.com/keys> |
+| Cerebras | `CEREBRAS_API_KEY` | <https://cloud.cerebras.ai/> |
+| Google AI Studio (Gemini) | `GEMINI_API_KEY` | <https://aistudio.google.com/apikey> |
+| OpenRouter | `OPENROUTER_API_KEY` | <https://openrouter.ai/keys> |
+| NVIDIA NIM | `NVIDIA_API_KEY` | <https://build.nvidia.com/> |
+| Mistral | `MISTRAL_API_KEY` | <https://console.mistral.ai/> |
+| GitHub Models | `GITHUB_TOKEN` | <https://github.com/settings/tokens> |
+| SambaNova | `SAMBANOVA_API_KEY` | <https://cloud.sambanova.ai/> |
+| Together | `TOGETHER_API_KEY` | <https://api.together.ai/> |
+| Anthropic (paid) | `ANTHROPIC_API_KEY` | <https://console.anthropic.com/> |
+| OpenAI (paid) | `OPENAI_API_KEY` | <https://platform.openai.com/api-keys> |
+| DeepSeek / xAI / DeepInfra (paid) | `DEEPSEEK_API_KEY` / `XAI_API_KEY` / `DEEPINFRA_API_KEY` | vendor consoles |
+| Ollama (local) | — (no key) | <https://ollama.com/> |
+
+Custom OpenAI-compatible endpoints work too:
+
+```json
+{ "providers": { "myhost": { "base_url": "http://localhost:8080/v1", "api_key": "..." } } }
+```
+
+### Model catalog & failover
+
+- The model list comes from the live **models.dev catalog** (like the official
+  client), cached 5 min and refreshed hourly in the background — new models
+  appear, removed ones vanish automatically. `--models` prints it, free first.
+- **Rotation / failover:** on `429`/rate-limit the engine tries the next lane in
+  your `rotation` list; transient hiccups (timeout, 5xx, empty reply) retry the
+  same model with backoff. You'll see `[model changed -> groq/... (...)]`.
+  The picked model is always lane 0; stale lanes are dropped.
+- Reasoning models get a longer inter-chunk window (900s floor) so long silent
+  "thinks" aren't killed; `/thinking <level>` sets per-model reasoning effort
+  from the live catalog (e.g. `/thinking high`).
+
+## Agents
+
+- **build** (default) — full tools, autonomous (`KEEP_GOING` reminder).
+- **plan** — read-only; file edits and mutating bash are denied.
+- **explore** — read-only retrieval agent for code questions.
+- Switch with `/agent`, `Tab`, or `Ctrl+T`. Sub-agents via the `task` tool run
+  in their own sessions (parallelizable, depth-bounded by `subagent_depth`).
+
+## Tools (26 builtins)
+
+File & shell: `bash`, `read`, `write`, `edit`, `apply_patch`, `background_task`.
+Search & navigate: `lsp` (first for code), `glob`, `grep`, `find_symbols`, `summarize_file`, `history_search`.
+Web: `websearch` (DDG/Bing/Brave keyless + Exa/Parallel/Tavily/Serper/Brave-API keyed), `webfetch`, `webfetch_many` (parallel, Cloudflare-bypass cascade, proxy-pool support).
+Phone browser: `browser` (drive the phone's Chrome via CDP — status/connect,
+open/tabs/goto, snapshot/click/type/press/scroll, screenshot, js, close).
+Whole phone: `phone` (adb — status, tap x/y, swipe, type, key
+back/home/recent/..., app_open/app_list, screen, focused, shell).
+Orchestration: `task` (sub-agents: build/plan/explore/general), `todowrite`,
+`question` (interactive choice dialog), `skill` (load SKILL.md).
+Session & safety: `checkpoint` (snapshot/rollback), `verify` (syntax-check edited files),
+`remember` (persistent project memory), `quick_calc` (math/json/base64/hash/regex/time),
+`screen_view` (inspect the running TUI), `device` (wake-lock/battery/vibrate),
+`speak` (TTS readout, offline or ElevenLabs).
+
+Plus config-driven extension, no SDK needed:
+
+```json
+{
+  "plugins": ["my_tools"],
+  "mcpServers": {
+    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"] }
+  }
+}
+```
+
+- **Plugins:** modules exposing `TOOLS = [{name, description, parameters, run}]`.
+- **MCP servers:** any stdio JSON-RPC server; remote tools appear as
+  `mcp__<server>__<tool>` (pure-Python client, shared process per server).
+
+Tool output is capped (`tool_output.max_lines/max_bytes`); disable any tool with
+`"tools": { "webfetch": false }`.
+
+## Slash commands
+
+```
+/help  /new (/clear)  /models  /connect  /permissions  /config  /theme
+/resume (/continue)  /sessions (/ls)  /export (/save)  /agent  /model
+/thinking  /undo  /compact (/summarize)  /init  /review
+/mcp  /skills (/skill)  /exit (/quit)
+```
+
+- `/undo` reverts the last `edit`/`write` (20 snapshots kept).
+- `/config validate` checks provider/rotation/permission values.
+- `/thinking [show|hide|last|<level>|off]` controls thought bubbles + effort.
+- `/compact` squeezes history to the last turns to save context.
+- `/export` writes the transcript to Markdown; `/init` scaffolds `AGENTS.md`.
+- `/skills` lists/validates/reloads `.opencode/skills/<name>/SKILL.md`
+  (also `.claude/skills`, `.agents/skills`, global `~/.config/opencode/skills`).
+
+## Permissions
+
+Rule engine (`permission: {tool: action}` + per-agent overrides), last matching
+rule wins. Modes: `auto` (allow-all, deny rules still apply), `ask` (popup per
+action), `deny` (block unless allowed), `fully_auto` (auto + zero popups,
+question dialogs suppressed too). Headless `--auto` approves unless denied.
+
+## Config
+
+`opencode.json` in the project dir (walked up to the worktree root) merged over
+`~/.config/opencode_py/opencode.json`. JSONC supported (comments, trailing
+commas). Copy `opencode.json.example` to start. Full keys (see
+`--print-config`): `provider`, `model`, `small_model`, `default_agent`,
+`subagent_depth`, `theme`, `model_read_timeout`, `auto_retry[_count]`,
+`permission`, `permission_mode`, `tools`, `rotation`, `rotation_lock`,
+`reasoning_effort`, `show_thoughts`, `context_budget`, `compaction`,
+`bash_default_timeout`, `tool_output`, `system_prompt`, `instructions`,
+`low_data`/`save_data` (mobile save-data preset), `tts`, `diff`,
+`mcpTimeout`/`mcpToolTimeout`, `plugins`, `mcpServers`, custom `providers`.
+
+Env overrides: `OPENCODE_CONFIG` (file), `OPENCODE_CONFIG_CONTENT` (inline JSON),
+`OPENCODE_PERMISSION` (JSON merged into permission). Config values support
+`{env:VAR}` (allowlisted) and `{file:path}` (confined to the config dir).
+
+## Sessions & memory
+
+Conversations persist as JSON (`~/.local/share/opencode_py/sessions`, durable
+fsync'd writes) — `/resume`, `/sessions` (`Ctrl+R`), arrow-key navigation
+between parent/sub-agent sessions, `/export` to Markdown. `remember` notes
+reload into every system prompt as project memory. The most-used live model
+becomes the default on fresh installs.
+
+## TTS (optional, off by default)
+
+`"tts": {"enabled": true, "auto": true}` reads replies aloud. Offline engines
+need no key; ElevenLabs cloud voices need `ELEVENLABS_API_KEY` (`/connect`
+ElevenLabs). Settings screen or `Settings > speak`.
+
+## TUI keybindings
+
+`Enter` send · `Ctrl+C`/`Esc Esc` interrupt · `Tab`/`Ctrl+T` agent ·
+`Ctrl+M` models · `Ctrl+R` sessions · `Ctrl+P`/`Ctrl+S` settings ·
+`Ctrl+Shift+E` thought · arrows parent/prev/next sub-agent ·
+`Home/End/PgUp/PgDn` scroll chat.
+
+## Low-RAM tips (old phones)
+
+- Prefer `*-free` / `flash` models (the default free list).
+- `--no-tui` drops the Textual UI: `echo 'fix the tests' | opencode-py --no-tui`.
+- `/new` or `/clear` trims context; budgets auto-trim (`util/truncate.py`).
+- `low_data: true` shrinks history window, tool caps, compaction tail.
+- `PYTHONUNBUFFERED=1` if output looks frozen.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `Cannot connect to host` / TLS errors | `pkg upgrade`; `python -m pip install --upgrade certifi` |
+| `429 Too Many Requests` | auto-rotates to next lane; add lanes or wait ~30s |
+| `Out of memory` | `--no-tui`, smaller model, `/clear` |
+| TUI renders but no text streams | headless (`--no-tui`) or `PYTHONUNBUFFERED=1` |
+| `unknown model` / `unknown provider` | `opencode-py --models`; `/config validate` |
+| `pip` missing package | `pip install -r requirements.txt` again |
+
+## Development
+
+```bash
+python -m pytest tests/ -q -p no:cacheprovider   # 351 fast tests (20 files), no network
+PYTHONPATH=. python -m pytest ../mvedhere/tests-parked/ -q -p no:cacheprovider  # 310 parked slow/niche tests
+ruff check opencode_py tests                     # lint (ruff.toml)
+python -m opencode_py.main --check
+```
+
+CI (`.github/workflows/tests.yml` at the repo root) runs ruff + the fast suite on
+push/PR, and the full suite (fast + parked) nightly via `schedule`.
+
+### Project layout
+
+```
+opencode_py/
+  main.py          CLI entry point (click)
+  config.py        opencode.json loading + deep merge
+  auth.py          API keys (env > providers.<id>.api_key > auth.json 0600)
+  commands.py      slash command registry
+  permission.py    ask/allow/deny engine
+  session.py       JSON conversation persistence
+  globals.py       XDG paths, worktree discovery
+  providers/       zen, openai_compat, anthropic, ollama, rotation/failover, catalog
+  agent/           loop, system prompt, messages, tool-call parsing, compaction
+  tools/           26 builtins + registry, plugins, MCP client
+    tools/browser.py  phone-Chrome driver (CDP: status/connect/open/tabs/goto/
+                      snapshot/click/type/press/scroll/wait/screenshot/js/close)
+  tui/             Textual app, chat, pickers, dialogs, themes
+  index/           code indexer (find_symbols backend)
+  util/            diff, sse, truncate, net, markdown, gitignore
+tests/             fast suite (20 files, 351 tests) + parked slow/niche (16 files, 310 tests)
+opencode.json.example  starter config
+```
+
+## License
+
+MIT — see `LICENSE`. Independent, from-scratch Python implementation; not the
+official opencode project.
