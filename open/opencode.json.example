@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": "opencode",
+  "model": "muse-spark-1.3-contributor-free",
+  "default_agent": "build",
+  "agents": {},
+  "theme": "opencode-dark",
+  "model_read_timeout": 300,
+  "auto_retry": true,
+  "auto_retry_count": 5,
+  "permission": { "bash": "allow", "edit": "ask", "webfetch": "ask", "browser": "allow", "phone": "allow" },
+  "rotation": [
+    { "provider": "opencode", "model": "muse-spark-1.3-contributor-free" },
+    { "provider": "groq", "model": "llama-3.3-70b-versatile" },
+    { "provider": "cerebras", "model": "llama-3.3-70b" }
+  ]
+}
