@@ -1,0 +1,2 @@
+[console_scripts]
+opencode-py = opencode_py.main:main
